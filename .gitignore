@@ -1,0 +1,23 @@
+# 환경 변수 및 비밀값
+.env
+*.local
+
+# Python 캐시
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# SQLite 데이터베이스
+*.db
+*.sqlite3
+
+# 가상환경
+.venv/
+env/
+venv/
+
+# 로컬 설정 및 로그
+.claude/settings.local.json
+*.log
+logs/
