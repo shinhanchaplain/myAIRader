@@ -304,21 +304,20 @@ def load_feed_items(source: str, min_score: float, limit: int = 50):
 
 # --- 상단 헤더 ---
 now_kst = datetime.now(KST).strftime("%Y. %m. %d. %p %I:%M:%S").replace("AM", "오전").replace("PM", "오후")
-st.markdown(f"""
-<div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 1rem;">
-  <div>
-    <h1 style="font-size: 1.6rem; font-weight: 800; color: #0f172a; margin: 0; display: inline-flex; align-items: center; gap: 0.5rem;">
-      📡 AI Radar
-    </h1>
-    <p style="font-size: 0.85rem; color: #64748b; margin: 0.2rem 0 0 0;">
-      GitHub · Hacker News · 카카오톡 AI 오픈채팅 동향 레이더
-    </p>
-  </div>
-  <div style="font-size: 0.75rem; color: #94a3b8;">
-    {now_kst}
-  </div>
-</div>
-""", unsafe_allow_html=True)
+header_html = (
+    '<div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 1rem;">'
+    '<div>'
+    '<h1 style="font-size: 1.6rem; font-weight: 800; color: #0f172a; margin: 0; display: inline-flex; align-items: center; gap: 0.5rem;">'
+    '📡 AI Radar'
+    '</h1>'
+    '<p style="font-size: 0.85rem; color: #64748b; margin: 0.2rem 0 0 0;">'
+    'GitHub · Hacker News · 카카오톡 AI 오픈채팅 동향 레이더'
+    '</p>'
+    '</div>'
+    f'<div style="font-size: 0.75rem; color: #94a3b8;">{now_kst}</div>'
+    '</div>'
+)
+st.markdown(header_html, unsafe_allow_html=True)
 
 
 # --- 20초 자동 갱신 실시간 대시보드 조각 (Fragment) ---
@@ -327,32 +326,31 @@ def render_dashboard_content():
     stats = load_stats_data()
 
     # 4개 통계 카드
-    st.markdown(f"""
-    <div class="stats-grid">
-      <div class="stat-card">
-        <div class="stat-title">수집 상태</div>
-        <div class="stat-val" style="color: #059669;">🟢 정상</div>
-        <div class="stat-sub">20초마다 자동 갱신</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-title">다음 수집까지</div>
-        <div class="stat-val">20 <span style="font-size: 1rem; font-weight: 400; color: #94a3b8;">초</span></div>
-        <div class="gauge-bg">
-          <div class="gauge-fill"></div>
-        </div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-title">24시간 신규 / 전체</div>
-        <div class="stat-val">{stats['new_24h']:,} <span style="font-size: 1rem; font-weight: 400; color: #94a3b8;">/ {stats['total']:,}</span></div>
-        <div class="stat-sub">GitHub {stats['github']} · HN {stats['hn']} · 카톡 {stats['kakao']}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-title">수집 성공률 (1시간)</div>
-        <div class="stat-val">{stats['success_rate']}%</div>
-        <div class="stat-sub">Slack 오늘 {stats['slack_sent']}/300건</div>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
+    stats_html = (
+        '<div class="stats-grid">'
+        '<div class="stat-card">'
+        '<div class="stat-title">수집 상태</div>'
+        '<div class="stat-val" style="color: #059669;">🟢 정상</div>'
+        '<div class="stat-sub">20초마다 자동 갱신</div>'
+        '</div>'
+        '<div class="stat-card">'
+        '<div class="stat-title">다음 수집까지</div>'
+        '<div class="stat-val">20 <span style="font-size: 1rem; font-weight: 400; color: #94a3b8;">초</span></div>'
+        '<div class="gauge-bg"><div class="gauge-fill"></div></div>'
+        '</div>'
+        '<div class="stat-card">'
+        '<div class="stat-title">24시간 신규 / 전체</div>'
+        f'<div class="stat-val">{stats["new_24h"]:,} <span style="font-size: 1rem; font-weight: 400; color: #94a3b8;">/ {stats["total"]:,}</span></div>'
+        f'<div class="stat-sub">GitHub {stats["github"]} · HN {stats["hn"]} · 카톡 {stats["kakao"]}</div>'
+        '</div>'
+        '<div class="stat-card">'
+        '<div class="stat-title">수집 성공률 (1시간)</div>'
+        f'<div class="stat-val">{stats["success_rate"]}%</div>'
+        f'<div class="stat-sub">Slack 오늘 {stats["slack_sent"]}/300건</div>'
+        '</div>'
+        '</div>'
+    )
+    st.markdown(stats_html, unsafe_allow_html=True)
 
     # 오늘 TOP 5 보고서 생성 버튼 및 미리보기 섹션
     col_head_title, col_head_btn = st.columns([3, 1.4])
@@ -437,11 +435,7 @@ def render_dashboard_content():
             ko_box_html = ""
             if ko_summary and ko_summary != orig_summary and ko_summary != it.get("title"):
                 safe_ko = html.escape(ko_summary)
-                ko_box_html = f'''
-                <div class="ko-summary-box">
-                  <span class="ko-label">🇰🇷 한글 요약:</span> {safe_ko}
-                </div>
-                '''
+                ko_box_html = f'<div class="ko-summary-box"><span class="ko-label">🇰🇷 한글 요약:</span> {safe_ko}</div>'
 
             # 본문 및 접기/펼치기
             desc_html = ""
@@ -449,13 +443,12 @@ def render_dashboard_content():
                 safe_desc = html.escape(orig_summary)
                 if len(safe_desc) > 80 or "\n" in safe_desc or src == "kakaotalk":
                     short_desc = safe_desc[:80] + "..."
-                    desc_html = f'''
-                    <div class="item-desc">{short_desc}</div>
-                    <details>
-                      <summary>전체 보기 ▼</summary>
-                      <div class="item-desc" style="white-space: pre-wrap; margin-top: 0.4rem; padding: 0.5rem; background: #f8fafc; border-radius: 0.375rem;">{safe_desc}</div>
-                    </details>
-                    '''
+                    desc_html = (
+                        f'<div class="item-desc">{short_desc}</div>'
+                        f'<details><summary>전체 보기 ▼</summary>'
+                        f'<div class="item-desc" style="white-space: pre-wrap; margin-top: 0.4rem; padding: 0.5rem; background: #f8fafc; border-radius: 0.375rem;">{safe_desc}</div>'
+                        f'</details>'
+                    )
                 else:
                     desc_html = f'<div class="item-desc">{safe_desc}</div>'
 
@@ -471,20 +464,19 @@ def render_dashboard_content():
             meta_str = " · ".join(meta_parts)
             meta_html = f'<div class="item-meta">{meta_str}</div>'
 
-            item_html = f'''
-            <div class="feed-item">
-              {badge_html}
-              <div style="flex-grow: 1; min-width: 0;">
-                <div style="display: flex; align-items: baseline; justify-content: space-between;">
-                  {title_elem}
-                  {score_elem}
-                </div>
-                {ko_box_html}
-                {desc_html}
-                {meta_html}
-              </div>
-            </div>
-            '''
+            item_html = (
+                f'<div class="feed-item">'
+                f'{badge_html}'
+                f'<div style="flex-grow: 1; min-width: 0;">'
+                f'<div style="display: flex; align-items: baseline; justify-content: space-between;">'
+                f'{title_elem}{score_elem}'
+                f'</div>'
+                f'{ko_box_html}'
+                f'{desc_html}'
+                f'{meta_html}'
+                f'</div>'
+                f'</div>'
+            )
             feed_html_list.append(item_html)
 
     feed_html_list.append('</div>')
