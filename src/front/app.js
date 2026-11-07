@@ -110,7 +110,7 @@ function renderFeed(items) {
         p.append(makeTextWithLinks(contentText));
         body.append(p);
 
-        const toggleBtn = el('button', 'text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-semibold mt-1 inline-flex items-center gap-1', '전체 보기 ▼');
+        const toggleBtn = el('button', 'text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-bold mt-1.5 inline-flex items-center gap-1 cursor-pointer', '전체 보기 ▼');
         toggleBtn.type = 'button';
         toggleBtn.onclick = (e) => {
           e.preventDefault();
