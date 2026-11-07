@@ -116,7 +116,7 @@ def ingest_message(conn: sqlite3.Connection, room: str, sender: str, message: st
     item = {
         "source": "kakaotalk", "source_id": make_source_id(room, sender, sent_at, text),
         "title": first_line[:80], "url": url_match.group(0) if url_match else None,
-        "summary": text[:200], "author": sender, "published_at": published,
+        "summary": text[:200], "summary_ko": text[:200], "author": sender, "published_at": published,
         "score": score, "tags": ",".join(hits), "room": room,
         "filter_tags": ",".join(verdict.tags),
     }

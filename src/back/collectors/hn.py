@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import httpx
 
 from .. import db, scorer
+from ..translator import translate_to_ko
 from .base import BaseCollector, CollectError, http_get_json
 
 BASE = "https://hacker-news.firebaseio.com/v0"
@@ -50,11 +51,18 @@ class HackerNewsCollector(BaseCollector):
         published = datetime.fromtimestamp(story.get("time", 0), timezone.utc).isoformat(timespec="seconds")
         title = story["title"]
         text = (story.get("text") or "")[:300]
-        score, hits = scorer.score_item(title, text, int(story.get("score") or 0), published, keywords)
+        points = int(story.get("score") or 0)
+        comments = int(story.get("descendants") or 0)
+        score, hits = scorer.score_item(title, text, points, published, keywords, hn_comments=comments)
+
+        # 영문 제목/본문 한글 번역/요약
+        source_text = text if text else title
+        summary_ko = translate_to_ko(source_text)
+
         item = {
             "source": "hn", "source_id": str(story["id"]), "title": title,
             "url": story.get("url") or f"https://news.ycombinator.com/item?id={story['id']}",
-            "summary": text, "author": story.get("by"), "stars": 0,
+            "summary": text, "summary_ko": summary_ko, "author": story.get("by"), "stars": 0,
             "published_at": published, "score": score, "tags": ",".join(hits),
         }
         return db.insert_item(conn, item) is not None

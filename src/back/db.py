@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS items (
   room          TEXT,
   notified_at   TEXT,
   filter_tags   TEXT DEFAULT '',
+  summary_ko    TEXT,
   UNIQUE(source, source_id)
 );
 CREATE TABLE IF NOT EXISTS collect_runs (
@@ -110,12 +111,12 @@ def insert_item(conn: sqlite3.Connection, item: dict) -> int | None:
     now = now_iso()
     cur = conn.execute(
         """INSERT OR IGNORE INTO items
-           (source, source_id, title, url, summary, author, stars, published_at,
+           (source, source_id, title, url, summary, summary_ko, author, stars, published_at,
             first_seen_at, last_seen_at, score, tags, room, filter_tags)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             item["source"], item["source_id"], item["title"], item.get("url"),
-            item.get("summary"), item.get("author"), item.get("stars", 0),
+            item.get("summary"), item.get("summary_ko"), item.get("author"), item.get("stars", 0),
             item.get("published_at"), now, now, item.get("score", 0.0),
             item.get("tags", ""), item.get("room"), item.get("filter_tags", ""),
         ),
@@ -123,8 +124,8 @@ def insert_item(conn: sqlite3.Connection, item: dict) -> int | None:
     if cur.rowcount == 1:
         return cur.lastrowid
     conn.execute(
-        "UPDATE items SET last_seen_at=?, stars=MAX(stars, ?) WHERE source=? AND source_id=?",
-        (now, item.get("stars", 0), item["source"], item["source_id"]),
+        "UPDATE items SET last_seen_at=?, stars=MAX(stars, ?), score=MAX(score, ?) WHERE source=? AND source_id=?",
+        (now, item.get("stars", 0), item.get("score", 0.0), item["source"], item["source_id"]),
     )
     return None
 

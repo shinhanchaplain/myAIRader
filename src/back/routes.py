@@ -147,6 +147,6 @@ def webhook_kakao(payload: KakaoWebhook, request: Request, background: Backgroun
         log.exception("웹훅 처리 실패")
         raise HTTPException(500, "내부 처리 오류") from exc
     db.record_run("kakao_webhook", started, 0, 1, int(result["result"] == "stored"), "ok")
-    if result["result"] == "stored" and result["score"] >= env_int("SLACK_MIN_SCORE", 8):
+    if result["result"] == "stored" and result["score"] >= env_int("SLACK_MIN_SCORE", 10):
         background.add_task(notifier.notify_pending)
     return result

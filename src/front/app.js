@@ -61,7 +61,14 @@ function renderFeed(items) {
     const title = url ? el('a', 'font-medium hover:underline break-words', it.title) : el('p', 'font-medium break-words', it.title);
     if (url) { title.href = url; title.target = '_blank'; title.rel = 'noopener noreferrer'; }
     body.append(title);
-    if (it.summary && it.summary !== it.title) body.append(el('p', 'text-sm text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2', it.summary));
+    if (it.summary_ko) {
+      const koBox = el('div', 'mt-1.5 p-2 bg-indigo-50/80 dark:bg-indigo-950/50 rounded-md border border-indigo-100 dark:border-indigo-900 text-xs text-slate-800 dark:text-indigo-100 leading-relaxed');
+      const koBadge = el('span', 'font-bold text-indigo-600 dark:text-indigo-400 mr-1.5', '🇰🇷 요약:');
+      koBox.append(koBadge, document.createTextNode(it.summary_ko));
+      body.append(koBox);
+    } else if (it.summary && it.summary !== it.title) {
+      body.append(el('p', 'text-sm text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2', it.summary));
+    }
     const meta = [];
     if (it.room) meta.push(it.room);
     if (it.author) meta.push(it.author);

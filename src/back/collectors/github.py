@@ -1,6 +1,7 @@
 """GitHub Search API 수집기: 토픽별 stars>50, 최근 갱신순."""
 from .. import db, scorer
 from ..config import env_str
+from ..translator import translate_to_ko
 from .base import BaseCollector, CollectError, http_get_json
 
 SEARCH_URL = "https://api.github.com/search/repositories"
@@ -44,11 +45,18 @@ class GitHubCollector(BaseCollector):
             return 0
         summary = (repo.get("description") or "")[:300]
         stars = int(repo.get("stargazers_count") or 0)
+        forks = int(repo.get("forks_count") or 0)
         pushed = repo.get("pushed_at")
-        score, hits = scorer.score_item(title, summary, stars, pushed, keywords)
+        score, hits = scorer.score_item(title, summary, stars, pushed, keywords, forks=forks)
+
+        # 영문 설명 한글 번역/요약 생성
+        source_text = summary if summary else title
+        summary_ko = translate_to_ko(source_text)
+
         item = {
             "source": "github", "source_id": title, "title": title,
             "url": repo.get("html_url"), "summary": summary,
+            "summary_ko": summary_ko,
             "author": (repo.get("owner") or {}).get("login"), "stars": stars,
             "published_at": pushed, "score": score, "tags": ",".join(hits),
         }

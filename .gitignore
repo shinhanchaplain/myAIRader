@@ -21,3 +21,5 @@ venv/
 .claude/settings.local.json
 *.log
 logs/
+*.db-shm
+*.db-wal

@@ -38,13 +38,14 @@ def send_slack(text: str) -> tuple[bool, str]:
 
 
 def format_message(item: dict) -> str:
-    """제목 + 링크 + 짧은 요약만 담는다(본문 전체 재게시 금지)."""
+    """제목 + 링크 + 한글 요약 설명을 담아 전송한다."""
     label = {"kakaotalk": "카톡", "github": "GitHub", "hn": "HN"}.get(item["source"], item["source"])
-    lines = [f"*[{label}] {item['title']}*  (점수 {item['score']})"]
+    lines = [f"*[{label}] {item['title']}*  (점수 {item['score']}점)"]
     if item.get("url"):
         lines.append(item["url"])
-    if item.get("summary"):
-        lines.append(item["summary"][:120])
+    ko_desc = item.get("summary_ko") or item.get("summary")
+    if ko_desc:
+        lines.append(f"🇰🇷 *한글 요약:* {ko_desc[:200]}")
     return "\n".join(lines)
 
 
@@ -68,7 +69,7 @@ def notify_pending() -> dict:
 
 def _notify_locked() -> dict:
     """락을 잡은 상태에서 실제 발송을 수행한다. 항목마다 즉시 커밋해 중복 발송을 막는다."""
-    min_score = env_int("SLACK_MIN_SCORE", 8)
+    min_score = env_int("SLACK_MIN_SCORE", 10)
     daily_limit = env_int("SLACK_DAILY_LIMIT", 30)
     started, sent, error = db.now_iso(), 0, None
     with db.get_conn() as conn:
