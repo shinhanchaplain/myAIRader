@@ -12,6 +12,7 @@ from . import db, notifier, scheduler
 from .collectors.base import run_collector
 from .collectors.kakaotalk import ingest_message, room_allowed
 from .config import KST, env_int, env_str
+from .report import generate_today_top5_report
 
 log = logging.getLogger("airadar.routes")
 router = APIRouter(prefix="/api")
@@ -150,3 +151,21 @@ def webhook_kakao(payload: KakaoWebhook, request: Request, background: Backgroun
     if result["result"] == "stored" and result["score"] >= env_int("SLACK_MIN_SCORE", 10):
         background.add_task(notifier.notify_pending)
     return result
+
+
+@router.post("/reports/top5")
+def export_top5_report() -> dict:
+    """오늘 최고 점수 받은 글 5개씩(전체글 & 카카오톡) 정리하고 저장한다."""
+    try:
+        content, file_path, data = generate_today_top5_report()
+        return {
+            "ok": True,
+            "file_path": file_path,
+            "markdown": content,
+            "top_overall": data["overall"],
+            "top_kakao": data["kakao"],
+        }
+    except Exception as exc:
+        log.exception("TOP 5 리포트 생성 실패")
+        raise HTTPException(500, f"리포트 생성 실패: {exc}") from exc
+

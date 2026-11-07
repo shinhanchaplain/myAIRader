@@ -223,3 +223,37 @@ refresh();
 setInterval(refresh, 5000);
 setInterval(tick, 1000);
 tick();
+
+// 오늘 TOP 5 브리핑 리포트 생성 및 저장 버튼
+const btnTop5 = $('btn-top5');
+if (btnTop5) {
+  btnTop5.onclick = async () => {
+    btnTop5.disabled = true;
+    btnTop5.textContent = '⏳ 리포트 생성 중…';
+    try {
+      const res = await fetch('/api/reports/top5', { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) {
+        const blob = new Blob([data.markdown], { type: 'text/markdown;charset=utf-8' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        const now = new Date();
+        const dateStr = now.getFullYear() + String(now.getMonth() + 1).padStart(2, '0') + String(now.getDate()).padStart(2, '0');
+        a.download = `AI_Radar_Top5_${dateStr}.md`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        alert(`✅ 오늘 TOP 5 브리핑 리포트가 성공적으로 정리 및 저장되었습니다!\n\n📁 서버 저장 경로:\n${data.file_path}`);
+      } else {
+        alert('❌ 리포트 생성 실패: ' + (data.error || '알 수 없는 오류'));
+      }
+    } catch (err) {
+      alert('❌ 서버 통신 오류: ' + err.message);
+    } finally {
+      btnTop5.disabled = false;
+      btnTop5.textContent = '📊 오늘 TOP 5 브리핑 저장';
+    }
+  };
+}
+

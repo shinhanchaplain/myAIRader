@@ -7,6 +7,7 @@ import html
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import streamlit as st
+from src.back.report import generate_today_top5_report
 
 # 1. 페이지 설정
 st.set_page_config(
@@ -352,6 +353,34 @@ def render_dashboard_content():
       </div>
     </div>
     """, unsafe_allow_html=True)
+
+    # 오늘 TOP 5 보고서 생성 버튼 및 미리보기 섹션
+    col_head_title, col_head_btn = st.columns([3, 1.4])
+    with col_head_title:
+        st.markdown('<div style="font-size: 1.15rem; font-weight: 700; color: #0f172a; margin-top: 0.2rem;">실시간 피드</div>', unsafe_allow_html=True)
+    with col_head_btn:
+        if st.button("📊 오늘 TOP 5 정리 & 저장", use_container_width=True, help="오늘 최고 점수 받은 글 5개씩(전체글 및 카카오톡) 정리하여 .md 파일로 저장합니다."):
+            with st.spinner("오늘의 인기글 TOP 5를 추출 및 정리하는 중..."):
+                rep_content, rep_path, rep_data = generate_today_top5_report()
+                st.session_state["top5_report"] = rep_content
+                st.session_state["top5_file_path"] = rep_path
+                st.success("✅ 오늘 TOP 5 브리핑 리포트가 성공적으로 저장되었습니다!")
+
+    if st.session_state.get("top5_report"):
+        with st.expander("📋 [일일 브리핑] 오늘 최고 인기글 TOP 5 마크다운 리포트", expanded=True):
+            st.markdown(st.session_state["top5_report"])
+            col_down1, col_down2 = st.columns([2, 1])
+            with col_down1:
+                st.caption(f"📁 저장 파일: `{st.session_state.get('top5_file_path')}`")
+            with col_down2:
+                file_ts = datetime.now(KST).strftime('%Y%m%d_%H%M%S')
+                st.download_button(
+                    "💾 마크다운(.md) 다운로드",
+                    data=st.session_state["top5_report"],
+                    file_name=f"AI_Radar_Top5_{file_ts}.md",
+                    mime="text/markdown",
+                    use_container_width=True,
+                )
 
     # 필터 컨트롤 (상단 탭 형식)
     col_filter1, col_filter2 = st.columns([3, 2])
