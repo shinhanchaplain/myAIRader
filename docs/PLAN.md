@@ -5,6 +5,8 @@
 > **근거 자료**: 16주차 강의안 PDF 16종 · `프롬프트.txt` · 6장 `myCode/myOmc` 예제 · 대표님 PC 환경 점검(2026-11-06 19:45) · 데이터 소스 실측(같은 시각)
 > **표기**: 강의안 근거는 `(16장 p12)` 식으로 표시. "추정"은 슬라이드에서 읽어낸 해석입니다.
 
+> **v2 증보 (2026-11-07)**: 카카오톡 AI 오픈채팅방 **듀얼 수집 파이프라인**(웹훅 + 대화록 파서), 지능형 잡담 필터, 카톡 노란 배지 피드, 점수 기반 Slack 즉시 알림이 추가되었습니다. 상세 설계는 **[13장](#13-v2-카카오톡-듀얼-수집-파이프라인-설계)** 에 있고, 기존 1~12장과 충돌하는 부분은 13장이 우선합니다.
+
 ---
 
 ## 0. 한눈에 보기
@@ -205,7 +207,7 @@ flowchart LR
 ```sql
 CREATE TABLE IF NOT EXISTS items (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  source        TEXT NOT NULL,          -- github | hn | geeknews | arxiv
+  source        TEXT NOT NULL,          -- github | hn | geeknews | arxiv | kakaotalk (v2: 13장 참고, room/notified_at 컬럼 추가)
   source_id     TEXT NOT NULL,          -- 레포 full_name / HN id / 기사 URL / arXiv id
   title         TEXT NOT NULL,
   url           TEXT,
@@ -550,3 +552,264 @@ README.md 에 설치·실행·.env 설정·테스트 방법을 한국어로 정�
 | Hermes | 수집 결과를 Hermes `cron`으로 아침 브리핑 → Slack/폰 전달 |
 | 교재·출판 | "60초 레이더 만들기" 장으로 확장 (부크크 전자책) |
 | 확장 | 키워드·소스 교체로 *행정 규정 변경*, *입시 뉴스*, *경쟁사 모니터* 레이더 (6대 사업 중 신한대 앱·마케팅 도구) |
+
+
+---
+
+## 13. v2 카카오톡 듀얼 수집 파이프라인 설계
+
+> **상태**: 초안 · **작성일**: 2026-11-07 · **원본 요청**: "해외 데이터 + 카톡 오픈채팅 알짜 정보를 자동 수집해 강의 소재·대시보드로 활용"
+> 기존 1~12장의 결정(포트 8020, 2-레인 수집, `max_instances=1`, heartbeat)은 그대로 유지하고 **카카오톡 레인만 추가**합니다.
+
+### 13-1. 요구사항 요약
+
+| ID | 사용자 스토리 | 완료 기준 |
+|---|---|---|
+| K-1 | 강사로서, 카톡 알림 봇이 쏜 새 글이 즉시 레이더에 들어오길 원한다 | `POST /api/webhook/kakao` 호출 후 3초 이내 DB 저장(유용 글) 또는 `rejected` 응답(잡담) |
+| K-2 | 강사로서, 내보낸 과거 대화록(`data/kakaotalk/*.txt`)도 한 번에 넣고 싶다 | 파일 추가 후 최대 60초 안에 파싱·저장, 같은 파일 재스캔해도 중복 0건 |
+| K-3 | 강사로서, 인사·ㅋㅋ 같은 잡담은 보고 싶지 않다 | 샘플 대화록 기준 잡담 5건 탈락, 공지·꿀팁·논문 링크 3건 저장 (13-5 표) |
+| K-4 | 강사로서, 카톡 글은 노란 배지로 구분해 보고 싶다 | 피드에 `#FEE500` 배지 + 방 이름 표시 |
+| K-5 | 운영자로서, 60초 카운트다운 게이지로 다음 수집 시점을 알고 싶다 | 게이지가 60→0으로 줄고 0에서 데이터 갱신 |
+| K-6 | 강사로서, 점수 높은 핵심 소식은 Slack으로 바로 받고 싶다 | 점수 ≥ 임계값이면 1회만 발송(중복 발송 0건) |
+
+**범위 밖(Won't)**: 카톡 비공식 크롤링·PC 카톡 화면 자동화, 1:1/비공개 채팅 수집, 이미지·파일 본문 분석, 유료 LLM 요약.
+
+### 13-2. 시스템 아키텍처
+
+```mermaid
+flowchart LR
+    subgraph KAKAO["카카오톡 입력 (듀얼)"]
+        BOT["폰의 알림 봇<br/>(알림 리더/매크로 앱)"]
+        TXT["data/kakaotalk/*.txt<br/>대화 내보내기"]
+    end
+    subgraph BACK["FastAPI (포트 8020)"]
+        WH["POST /api/webhook/kakao<br/>비밀 헤더 검증"]
+        PARSER["collectors/kakaotalk.py<br/>대화록 파서 (60초 스캔)"]
+        FILT["collectors/kakao_filter.py<br/>잡담 필터 + 정규화"]
+        SCR["scorer.py"]
+        DB[("SQLite<br/>items · collect_runs · keywords · file_cursors")]
+        NTF["notifier.py"]
+    end
+    BOT -- "HTTPS (터널)" --> WH --> FILT
+    TXT --> PARSER --> FILT
+    FILT -- "통과 글만" --> SCR --> DB
+    DB --> NTF --> SL["Slack #새-채널<br/>(hermes 봇)"]
+    DB --> API["REST API"] --> UI["대시보드<br/>노란 배지 피드"]
+```
+
+**핵심 원칙**
+1. 웹훅과 파서는 **같은 필터·같은 `source_id` 규칙**을 쓴다. 같은 글이 두 경로로 들어와도 `UNIQUE(source, source_id)`로 1건만 남는다.
+2. 필터를 통과하지 못한 글은 **저장하지 않는다**(개인정보 최소 수집). 대신 건수만 `collect_runs.fetched - inserted`로 남는다.
+3. 외부 노출 면은 웹훅 하나뿐이며 **비밀 헤더 + 본문 크기 제한 + 방 허용 목록**으로 막는다.
+
+### 13-3. 디렉토리 구조 (변경분 표시: ★)
+
+```text
+myAIRader\
+├─ CLAUDE.md  .env  .env.example ★(KAKAO_* 추가)
+├─ data\kakaotalk\                     # 대화록 .txt 투입 폴더 (sample_chat.txt 포함)
+├─ src\back\
+│  ├─ main.py          # 앱 생성, 라이프사이클(DB 초기화·스케줄러 시작)
+│  ├─ db.py            # 스키마·INSERT OR IGNORE·조회 ★(file_cursors, 컬럼 추가)
+│  ├─ scheduler.py     # 60초 수집 작업 ★(kakaotalk 파일 스캔 작업 추가)
+│  ├─ scorer.py        # 점수화 ★(카톡 가산점)
+│  ├─ routes.py        # REST API ★(웹훅 엔드포인트 포함)
+│  ├─ notifier.py      # Slack 발송 ★(즉시 알림 + 중복 방지)
+│  └─ collectors\
+│     ├─ base.py       # BaseCollector.collect() -> dict
+│     ├─ github.py  hn.py  rss.py  arxiv.py
+│     ├─ kakaotalk.py ★   # 대화록 파서 + 웹훅 페이로드 정규화
+│     └─ kakao_filter.py ★ # 잡담 필터(순수 함수, 테스트 용이)
+├─ src\front\  index.html ★(노란 배지·게이지)  app.js
+├─ docs\  PLAN.md  API.md ★(웹훅 명세)  radar_analyze.md
+└─ tests\  test_db.py  test_collectors.py  test_api.py  test_kakao_filter.py ★  test_webhook.py ★
+```
+
+> CLAUDE.md의 기존 구조(`kakaotalk.py` 포함)를 따르며, 신규 파일은 `kakao_filter.py` 하나뿐입니다. 웹훅 라우트는 별도 파일을 만들지 않고 `routes.py`에 둡니다.
+
+### 13-4. DB 스키마 변경
+
+기존 `items`에 컬럼 3개를 추가하고 테이블 1개를 신설합니다.
+
+```sql
+-- items 추가 컬럼 (kakaotalk 전용 값은 다른 소스에서 NULL)
+ALTER TABLE items ADD COLUMN room        TEXT;   -- 오픈채팅방 이름
+ALTER TABLE items ADD COLUMN notified_at TEXT;   -- Slack 발송 시각 (NULL=미발송, 중복 발송 방지)
+ALTER TABLE items ADD COLUMN filter_tags TEXT DEFAULT '';  -- 통과 사유: url,keyword,notice
+
+-- 대화록 파일 처리 위치 (재스캔 시 변경 없는 파일 건너뛰기)
+CREATE TABLE IF NOT EXISTS file_cursors (
+  path        TEXT PRIMARY KEY,
+  size_bytes  INTEGER NOT NULL,
+  mtime       REAL NOT NULL,
+  parsed_at   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_items_score ON items(score DESC, first_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_items_notify ON items(notified_at, score);
+```
+
+`items` 값 매핑(카톡):
+
+| 컬럼 | 값 |
+|---|---|
+| `source` | `kakaotalk` |
+| `source_id` | `sha1(방이름 \| 발신자 \| 분 단위 시각 \| 정규화한 본문)` 앞 16자 — **웹훅·파일 공통** |
+| `title` | 본문 첫 줄 80자 (공지 머리말 `[필독 공지]` 유지) |
+| `url` | 본문의 첫 http/https 링크 (없으면 NULL) |
+| `summary` | 본문 앞 200자 (원문 전체 재게시 금지) |
+| `author` | 닉네임 (개인정보 최소화, 13-9 미결정 ①) |
+| `published_at` | 발송 시각 → UTC ISO8601 (대화록은 KST 가정) |
+| `tags` | 매칭 키워드 쉼표 구분 |
+
+`collect_runs.source` 값 추가: `kakao_file`(파서 60초 작업), `kakao_webhook`(웹훅 요청 1건당 1행, 7일 지난 행은 정리).
+
+### 13-5. 지능형 잡담 필터 (`kakao_filter.py`)
+
+순수 함수 `classify(text) -> (통과 여부, 사유 태그, 정규화 본문)`. 규칙 기반이라 0원이고 설명 가능합니다. 순서가 중요합니다.
+
+1. **정규화**: 공백 압축, 이모티콘·`ㅋ/ㅎ` 반복 축약, 앞뒤 공백 제거.
+2. **자동 통과 A — URL**: `https?://` 포함 (단, 링크만 있고 `ㅋㅋ`류 반응 글이면 3번이 아니라 여기서 통과).
+3. **잡담 탈락(키워드 검사보다 먼저)**:
+   - 길이(공백 제외) 10자 미만
+   - `^(안녕|반갑|감사|고맙|네+|넵|ㅇㅇ|ㅇㅋ|오|와|대박)`로 시작하고 40자 미만이며 URL 없음
+   - `ㅋ·ㅎ·ㅠ·ㅜ`가 본문의 50% 이상
+   - 이모티콘/이모지만으로 구성
+4. **통과 B — AI 키워드**: 사전(Claude, GPT, 프롬프트, 에이전트, MCP, 모델, 꿀팁, 팁, 공지, 필독, 논문, 스킬 … `keywords` 테이블 연동) 1개 이상 + **본문 20자 이상**.
+5. 위에 해당하지 않으면 탈락.
+
+**샘플 대화록(`sample_chat.txt`) 기대 결과** — 이것이 `test_kakao_filter.py`의 골든 데이터입니다.
+
+| 발화 | 기대 | 사유 |
+|---|---|---|
+| 안녕하세요 여러분! 오늘 워크숍 다들 잘 오셨나요? | 탈락 | 인사 (키워드 없음) |
+| 네 안녕하세요~ 반갑습니다! ㅎㅎ | 탈락 | 인사 |
+| ㅋㅋ 오늘 날씨 좋네요 | 탈락 | 웃음 + 키워드 없음 |
+| [필독 공지] Anthropic에서 Claude 3.7 … 링크 | **통과** | url, keyword, notice |
+| 와 대박이네요 링크 감사합니다!! | 탈락 | URL 없음 ("링크"는 키워드 아님) |
+| [꿀팁 공유] FastAPI에 APScheduler … | **통과** | keyword |
+| **좋은 꿀팁 감사합니다 스크랩해둘게요!** | **탈락** | ⚠ "꿀팁"이 있어도 감사 반응 글 → 3번(`감사`)·길이 규칙으로 걸러야 함 |
+| 최신 AI 에이전트 논문 … arxiv 링크 | **통과** | url, keyword |
+
+> 마지막에서 두 번째 행이 가장 흔한 오탐입니다. 키워드 일치만으로 통과시키면 "꿀팁 감사합니다" 같은 반응 글이 피드를 오염시키므로, **잡담 탈락 규칙을 키워드 통과보다 먼저** 적용하고 "감사/고맙" 패턴은 URL이 없을 때 키워드가 있어도 탈락시킵니다.
+
+### 13-6. 웹훅 설계 — `POST /api/webhook/kakao`
+
+**요청**
+```http
+POST /api/webhook/kakao
+Content-Type: application/json
+X-Webhook-Secret: <.env 의 KAKAO_WEBHOOK_SECRET>
+
+{ "room": "AI 실무 스킬 & 트렌드", "sender": "AI큐레이터",
+  "message": "[필독 공지] ... https://...", "sent_at": "2026-11-07T08:55:00+09:00" }
+```
+`sent_at` 생략 시 서버 수신 시각(KST)을 사용합니다.
+
+**응답**
+
+| 상태 | 본문 | 의미 |
+|---|---|---|
+| 200 | `{"result":"stored","id":12,"score":9.5}` | 필터 통과·저장 |
+| 200 | `{"result":"duplicate"}` | 이미 저장된 글 |
+| 200 | `{"result":"rejected","reason":"chitchat"}` | 잡담으로 탈락 (봇이 재시도하지 않도록 200) |
+| 401 | `{"detail":"인증 실패"}` | 비밀 헤더 누락/불일치 (`hmac.compare_digest`) |
+| 403 | `{"detail":"허용되지 않은 방"}` | `KAKAO_ALLOWED_ROOMS` 밖의 방 |
+| 413/422 | 한국어 오류 메시지 | 본문 4KB 초과 / 필수 필드 누락 |
+
+**처리 순서**: 헤더 검증 → pydantic 검증(`message` 최대 4000자) → 방 허용 목록 → `kakao_filter.classify` → `scorer` → `INSERT OR IGNORE` → `collect_runs(kakao_webhook)` 기록 → 점수 ≥ 임계값이면 `BackgroundTasks`로 Slack 발송(응답 지연 방지). 요청 처리 중 예외는 500으로 삼키지 않고 `collect_runs`에 `error`로 남깁니다.
+
+**외부 도달성**: 폰의 알림 봇이 `localhost:8020`에 직접 못 닿으므로 같은 Wi-Fi의 PC IP(`http://<PC IP>:8020`, 서버를 `--host 0.0.0.0`으로 기동)를 쓰거나 터널(cloudflared 등)을 씁니다. 포트는 어느 경우도 **8020**이며 터널 URL은 코드·문서에 적지 않고 봇 앱 설정에만 둡니다.
+
+### 13-7. 대화록 파서 설계 (`collectors/kakaotalk.py`)
+
+- **스캔**: 60초마다 `data/kakaotalk/*.txt`를 순회, `file_cursors`의 `size/mtime`이 같으면 건너뜀 → 신규 0건이어도 `kakao_file`에 `status=ok` 기록(heartbeat).
+- **형식 파싱** (샘플 기준):
+  - 1행 `[방 이름] 카카오톡 대화` → `room`
+  - `--------------- 2026년 11월 7일 토요일 ---------------` → 현재 날짜 갱신
+  - `[이름] [오전 8:50] 본문` → 새 메시지. 오전/오후 12시간제를 24시간으로 변환(오후 12시=12시, 오전 12시=0시)
+  - 위 두 패턴이 아닌 줄 → **직전 메시지의 다음 줄**로 이어 붙임(여러 줄 메시지)
+  - `님이 들어왔습니다` / `님이 나갔습니다` / `사진`, `이모티콘` 등 시스템 줄 제외
+- **인코딩**: UTF-8 우선, 실패 시 `utf-8-sig` → `cp949` 순서로 폴백. 모두 실패하면 해당 파일만 `error` 기록 후 다음 파일 진행.
+- **대용량 대비**: 줄 단위 스트리밍으로 읽고 100건 단위로 트랜잭션 커밋.
+- 시각은 분 단위까지만 있으므로 같은 분·같은 발신자·같은 본문은 같은 글로 간주(`source_id` 규칙).
+
+### 13-8. 점수·Slack 알림·대시보드
+
+**점수** (`scorer.py` 확장): 기존 키워드 점수에 카톡 가산점을 더합니다.
+`+3`(공지/필독 머리말), `+2`(URL 포함), `+1`(본문 100자 이상). 시간 감쇠는 동일(6시간 반감).
+
+**Slack** (`notifier.py`):
+- 즉시 알림: `score ≥ SLACK_MIN_SCORE`(기본 8) **그리고** `notified_at IS NULL` → 발송 후 `notified_at` 기록 (같은 글 재발송 방지, 앱 재시작에도 유지).
+- 기존 5분 요약은 유지하되 `notified_at`이 이미 있는 항목은 제외.
+- 토큰 `SLACK_BOT_TOKEN`(hermes 봇), 채널은 이름이 아니라 `SLACK_CHANNEL_ID`로 지정(#새-채널의 채널 ID). 봇이 채널에 초대되어 있어야 합니다.
+- 메시지 = 제목 + 링크 + 1~2줄 요약만. 본문 전체 재게시 금지. 실패는 `collect_runs`가 아닌 `source='slack'` 행으로 기록하고 로그에도 남김.
+
+**대시보드** (`src/front/`):
+- **60초 카운트다운 게이지**: 서버가 `/api/health`에 `next_run_at`을 내려주고, 프런트는 이를 기준으로 진행 바를 매초 갱신 → 0에서 `/api/items`·`/api/runs` 재조회(서버 시각과 어긋나지 않도록 클라이언트 타이머 단독 사용 금지).
+- **카톡 노란 배지**: `카톡` 라벨, 배경 `#FEE500`, 글자 `#191919`. 방 이름은 보조 텍스트. 소스 필터 탭에 `카카오톡` 추가. 다크모드에서도 배경색 유지.
+- **수집 로그 표**: `kakao_file`, `kakao_webhook` 행 포함, `error`는 빨간 행, 최근 50건.
+
+**API 추가**: `POST /api/webhook/kakao`, `GET /api/items?source=kakaotalk&room=`, `GET /api/health`에 `next_run_at`·카톡 레인 상태 추가.
+
+### 13-9. 미결정 사항 (사용자 결정 필요)
+
+1. **발신자 닉네임 저장 여부** — 규칙상 개인정보 수집 금지. 권장: 닉네임을 저장하되 화면에는 표시하고, 실명·전화번호 패턴은 저장 전 마스킹. 대안: 해시 처리 또는 미저장.
+2. **알림 봇 종류** — 폰 알림 리더/매크로 앱 중 무엇을 쓸지에 따라 JSON 필드가 달라집니다. 일단 위 4개 필드 형식으로 고정하고, 앱 쪽에서 맞추는 것으로 가정했습니다.
+3. **웹훅 외부 노출 방식** — 같은 Wi-Fi(IP 직결)로 갈지, 터널로 갈지.
+4. **Slack 즉시 알림 임계값** — 기본 `SLACK_MIN_SCORE=8`로 시작해도 되는지, 하루 최대 발송 건수 제한(예: 20건)을 둘지.
+5. **수집 대상 방 허용 목록** — `KAKAO_ALLOWED_ROOMS`에 넣을 방 이름.
+
+### 13-10. 위험요소와 대응
+
+| 리스크 | 대응 |
+|---|---|
+| 웹훅이 외부에 열려 스팸·위조 유입 | 비밀 헤더(`hmac.compare_digest`), 방 허용 목록, 4KB 제한 |
+| 개인정보·사적 대화 유입 | 오픈채팅 공개방만 허용, 통과 글만 저장, 전화번호·이메일 패턴 마스킹 |
+| 키워드 오탐(반응 글 통과) | 잡담 규칙 우선, 골든 테스트로 고정 |
+| 대화록 형식이 PC/모바일 버전에 따라 다름 | 파서를 정규식 2개로 단순화, 실패한 줄은 건너뛰되 건수를 로그에 기록 |
+| 같은 글이 웹훅·파일 양쪽으로 중복 | 공통 `source_id` 규칙 + `UNIQUE` |
+| Slack 중복·폭주 | `notified_at` 플래그, 임계값, 일일 상한 |
+| 한글 인코딩 깨짐(Windows) | 인코딩 폴백, 로그·콘솔은 UTF-8 |
+
+### 13-11. 단계별 구현 체크리스트
+
+각 단계 끝에 `pytest -q`와 서버 기동으로 직접 확인하고 `git commit`합니다 (CLAUDE.md 규칙 7·8).
+
+**S0. 준비**
+- [ ] `.env.example`에 `KAKAO_WEBHOOK_SECRET=`, `KAKAO_ALLOWED_ROOMS=`, `SLACK_MIN_SCORE=8` 추가 (실제 `.env`에는 직접 입력, 값은 커밋 금지)
+- [ ] 13장 승인 + 13-9 미결정 사항 확정 → 커밋 `docs: 카톡 수집 설계`
+
+**S1. 기반 (M1)** — 카톡 없이도 동작하는 60초 수집
+- [ ] `db.py`: 스키마·`INSERT OR IGNORE`·`file_cursors`·컬럼 추가(`init_db`가 기존 DB에도 안전하게 마이그레이션)
+- [ ] `collectors/base.py`, `github.py`, `hn.py`, `scheduler.py`(`max_instances=1`, `coalesce=True`), `main.py`, `/api/health`
+- [ ] 확인: 서버 기동 후 60초 간격으로 `collect_runs` 증가 · 커밋 `feat: 60초 수집 파이프라인`
+
+**S2. 필터 (카톡 핵심 로직)**
+- [ ] `kakao_filter.py` 순수 함수 구현
+- [ ] `test_kakao_filter.py`: 13-5의 골든 8건 + 경계(URL만, 빈 문자열, 이모지만, 긴 잡담)
+- [ ] 커밋 `feat: 잡담 필터`
+
+**S3. 대화록 파서**
+- [ ] `kakaotalk.py`: 형식 파싱·오전/오후 변환·여러 줄 이어붙임·인코딩 폴백
+- [ ] 스케줄러에 `kakao_file` 작업 추가(60초, `file_cursors`로 변경 없는 파일 건너뜀)
+- [ ] 확인: `sample_chat.txt` → 정확히 3건 저장, 재실행 시 0건 추가, `collect_runs`에 `ok` · 커밋 `feat: 대화록 파서`
+
+**S4. 웹훅**
+- [ ] `routes.py`: `POST /api/webhook/kakao` (13-6 응답 표 전부)
+- [ ] `test_webhook.py`: 인증 실패 401 · 허용 외 방 403 · 잡담 rejected · 중복 duplicate · 정상 stored · 파일 경로와 중복 시 1건
+- [ ] 확인: `curl`/`httpx`로 직접 POST해 DB 반영 확인 · 커밋 `feat: 카톡 웹훅`
+
+**S5. 점수·API·대시보드 (M2)**
+- [ ] `scorer.py` 카톡 가산점, `/api/items` room 필터, `/api/health` `next_run_at`
+- [ ] `index.html`·`app.js`: 60초 게이지, 노란 배지 피드, 로그 표, 경고 배너
+- [ ] 확인: 브라우저에서 게이지 0 → 건수 갱신, 웹훅 POST 직후 노란 배지 글 등장 · 커밋 `feat: 대시보드 카톡 피드`
+
+**S6. Slack**
+- [ ] `notifier.py`: `chat.postMessage` 직접 호출(타임아웃 10초·재시도 2회), 즉시 알림 + `notified_at` 중복 방지
+- [ ] `/api/notify/test`로 #새-채널 수신 확인, 같은 글 재발송 0건 확인 · 커밋 `feat: Slack 즉시 알림`
+
+**S7. 마무리**
+- [ ] 오류 주입(네트워크 차단·잘못된 토큰·깨진 대화록) → 서버 생존 + 로그/화면 경고
+- [ ] `docs/API.md`에 웹훅 명세 반영, `docs/radar_analyze.md` 갱신, 비밀값이 커밋에 없는지 `git status` 확인
+- [ ] 최종 `pytest -q` 통과 + push
