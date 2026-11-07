@@ -225,11 +225,11 @@ setInterval(tick, 1000);
 tick();
 
 // 오늘 TOP 5 브리핑 리포트 생성 및 저장 버튼
-const btnTop5 = $('btn-top5');
-if (btnTop5) {
-  btnTop5.onclick = async () => {
-    btnTop5.disabled = true;
-    btnTop5.textContent = '⏳ 리포트 생성 중…';
+document.querySelectorAll('.btn-top5-trigger').forEach((btn) => {
+  btn.onclick = async () => {
+    btn.disabled = true;
+    const oldText = btn.textContent;
+    btn.textContent = '⏳ 생성 중…';
     try {
       const res = await fetch('/api/reports/top5', { method: 'POST' });
       const data = await res.json();
@@ -251,9 +251,9 @@ if (btnTop5) {
     } catch (err) {
       alert('❌ 서버 통신 오류: ' + err.message);
     } finally {
-      btnTop5.disabled = false;
-      btnTop5.textContent = '📊 오늘 TOP 5 브리핑 저장';
+      btn.disabled = false;
+      btn.textContent = oldText;
     }
   };
-}
+});
 

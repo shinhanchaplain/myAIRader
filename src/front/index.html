@@ -15,7 +15,10 @@
       <h1 class="text-2xl font-bold tracking-tight">📡 AI Radar</h1>
       <p class="text-sm text-slate-500 dark:text-slate-400">GitHub · Hacker News · 카카오톡 AI 오픈채팅 동향 레이더</p>
     </div>
-    <span id="clock" class="text-xs text-slate-400"></span>
+    <div class="flex items-center gap-3">
+      <button class="btn-top5-trigger px-3.5 py-2 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white transition-all cursor-pointer flex items-center gap-1.5 shadow-md" title="오늘 최고 점수 받은 글 5개씩(전체글 및 카카오톡) 정리하고 .md 파일로 저장">📊 오늘 TOP 5 브리핑 저장 (.md)</button>
+      <span id="clock" class="text-xs text-slate-400"></span>
+    </div>
   </header>
 
   <main class="max-w-6xl mx-auto px-4 pb-12 space-y-6">
@@ -51,7 +54,7 @@
         <h2 class="font-semibold mr-2">실시간 피드</h2>
         <div id="tabs" class="flex gap-1 text-sm"></div>
         <div id="scope" class="flex gap-1 text-sm ml-auto" role="group" aria-label="점수 필터"></div>
-        <button id="btn-top5" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition-all cursor-pointer flex items-center gap-1 shadow-sm shrink-0" title="오늘 최고 점수 받은 글 5개씩(전체글 및 카카오톡) 정리하고 .md 파일로 저장">📊 오늘 TOP 5 브리핑 저장</button>
+        <button id="btn-top5" class="btn-top5-trigger px-3 py-1.5 text-xs font-bold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition-all cursor-pointer flex items-center gap-1 shadow-sm shrink-0" title="오늘 최고 점수 받은 글 5개씩(전체글 및 카카오톡) 정리하고 .md 파일로 저장">📊 오늘 TOP 5 브리핑 저장</button>
       </div>
       <ul id="feed" class="divide-y divide-slate-100 dark:divide-slate-700">
         <li class="p-6 text-center text-slate-400 text-sm">불러오는 중…</li>
@@ -72,6 +75,6 @@
     </section>
   </main>
 
-  <script src="/app.js?v=20261107_03"></script>
+  <script src="/app.js?v=20261107_05"></script>
 </body>
 </html>
