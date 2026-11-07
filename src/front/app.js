@@ -51,6 +51,30 @@ function safeUrl(u) {
   return /^https?:\/\//i.test(u || '') ? u : null;
 }
 
+function makeTextWithLinks(text) {
+  const container = document.createDocumentFragment();
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  let lastIdx = 0;
+  let match;
+  while ((match = urlRegex.exec(text)) !== null) {
+    if (match.index > lastIdx) {
+      container.append(document.createTextNode(text.substring(lastIdx, match.index)));
+    }
+    const a = document.createElement('a');
+    a.href = match[0];
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.className = 'text-indigo-600 dark:text-indigo-400 hover:underline break-all font-medium';
+    a.textContent = match[0];
+    container.append(a);
+    lastIdx = urlRegex.lastIndex;
+  }
+  if (lastIdx < text.length) {
+    container.append(document.createTextNode(text.substring(lastIdx)));
+  }
+  return container;
+}
+
 function renderFeed(items) {
   const ul = $('feed');
   ul.replaceChildren();
@@ -67,15 +91,44 @@ function renderFeed(items) {
     const title = url ? el('a', 'font-medium hover:underline break-words', it.title) : el('p', 'font-medium break-words', it.title);
     if (url) { title.href = url; title.target = '_blank'; title.rel = 'noopener noreferrer'; }
     body.append(title);
+
     // 번역이 실패했거나 원문과 같으면(중복) 한글 요약 상자를 만들지 않는다
     const ko = (it.summary_ko || '').trim();
     if (ko && ko !== (it.summary || '').trim() && ko !== it.title) {
       const koBox = el('div', 'mt-1.5 px-3 py-2 bg-indigo-50 dark:bg-indigo-950/50 rounded-lg border-l-4 border-indigo-500 text-sm text-slate-800 dark:text-indigo-100 leading-relaxed');
       koBox.append(el('span', 'font-bold text-indigo-600 dark:text-indigo-300 mr-1.5', '🇰🇷 한글 요약:'), document.createTextNode(ko));
       body.append(koBox);
-    } else if (it.summary && it.summary !== it.title) {
-      body.append(el('p', 'text-sm text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2', it.summary));
     }
+
+    // 본문 내용 (카톡 글이나 긴 글은 '전체 보기' 토글 및 링크 클릭 지원)
+    const contentText = (it.summary || '').trim();
+    if (contentText && contentText !== it.title) {
+      const p = el('div', 'text-sm text-slate-600 dark:text-slate-300 mt-1 whitespace-pre-wrap leading-relaxed');
+      const isLong = contentText.length > 70 || contentText.includes('\n') || it.source === 'kakaotalk';
+      if (isLong) {
+        p.classList.add('line-clamp-2');
+        p.append(makeTextWithLinks(contentText));
+        body.append(p);
+
+        const toggleBtn = el('button', 'text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-semibold mt-1 inline-flex items-center gap-1', '전체 보기 ▼');
+        toggleBtn.type = 'button';
+        toggleBtn.onclick = (e) => {
+          e.preventDefault();
+          if (p.classList.contains('line-clamp-2')) {
+            p.classList.remove('line-clamp-2');
+            toggleBtn.textContent = '간략히 접기 ▲';
+          } else {
+            p.classList.add('line-clamp-2');
+            toggleBtn.textContent = '전체 보기 ▼';
+          }
+        };
+        body.append(toggleBtn);
+      } else {
+        p.append(makeTextWithLinks(contentText));
+        body.append(p);
+      }
+    }
+
     const meta = [];
     if (it.room) meta.push(it.room);
     if (it.author) meta.push(it.author);
