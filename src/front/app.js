@@ -3,7 +3,9 @@ const INTERVAL = 60;
 const SOURCE_LABEL = { kakaotalk: '카톡', github: 'GitHub', hn: 'HN' };
 const TABS = [['', '전체'], ['kakaotalk', '카카오톡'], ['github', 'GitHub'], ['hn', 'Hacker News']];
 
-let state = { source: '', nextRunAt: null, offsetMs: 0, refreshing: false };
+const TOP_SCORE = 10; // 핵심 추천글 기준 점수
+// scope: 'top' = 10점 이상 추천글(기본), 'all' = 낮은 점수 포함 전체
+let state = { source: '', scope: 'top', nextRunAt: null, offsetMs: 0, refreshing: false };
 const $ = (id) => document.getElementById(id);
 
 function el(tag, cls, text) {
@@ -52,7 +54,11 @@ function safeUrl(u) {
 function renderFeed(items) {
   const ul = $('feed');
   ul.replaceChildren();
-  if (!items.length) { ul.append(el('li', 'p-6 text-center text-slate-400 text-sm', '아직 수집된 항목이 없습니다.')); return; }
+  if (!items.length) {
+    const msg = state.scope === 'top' ? `${TOP_SCORE}점 이상 추천글이 아직 없습니다. '전체 글 보기'를 눌러 보세요.` : '아직 수집된 항목이 없습니다.';
+    ul.append(el('li', 'p-6 text-center text-slate-400 text-sm', msg));
+    return;
+  }
   for (const it of items) {
     const li = el('li', 'p-4 flex gap-3 items-start hover:bg-slate-50 dark:hover:bg-slate-700/40');
     li.append(badge(it.source));
@@ -61,10 +67,11 @@ function renderFeed(items) {
     const title = url ? el('a', 'font-medium hover:underline break-words', it.title) : el('p', 'font-medium break-words', it.title);
     if (url) { title.href = url; title.target = '_blank'; title.rel = 'noopener noreferrer'; }
     body.append(title);
-    if (it.summary_ko) {
-      const koBox = el('div', 'mt-1.5 p-2 bg-indigo-50/80 dark:bg-indigo-950/50 rounded-md border border-indigo-100 dark:border-indigo-900 text-xs text-slate-800 dark:text-indigo-100 leading-relaxed');
-      const koBadge = el('span', 'font-bold text-indigo-600 dark:text-indigo-400 mr-1.5', '🇰🇷 요약:');
-      koBox.append(koBadge, document.createTextNode(it.summary_ko));
+    // 번역이 실패했거나 원문과 같으면(중복) 한글 요약 상자를 만들지 않는다
+    const ko = (it.summary_ko || '').trim();
+    if (ko && ko !== (it.summary || '').trim() && ko !== it.title) {
+      const koBox = el('div', 'mt-1.5 px-3 py-2 bg-indigo-50 dark:bg-indigo-950/50 rounded-lg border-l-4 border-indigo-500 text-sm text-slate-800 dark:text-indigo-100 leading-relaxed');
+      koBox.append(el('span', 'font-bold text-indigo-600 dark:text-indigo-300 mr-1.5', '🇰🇷 한글 요약:'), document.createTextNode(ko));
       body.append(koBox);
     } else if (it.summary && it.summary !== it.title) {
       body.append(el('p', 'text-sm text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2', it.summary));
@@ -115,11 +122,24 @@ function renderTabs() {
   }
 }
 
+function renderScope() {
+  const box = $('scope');
+  box.replaceChildren();
+  for (const [key, label] of [['top', `⭐ ${TOP_SCORE}점 이상 추천글`], ['all', '📜 전체 글 보기 (낮은 점수 포함)']]) {
+    const active = state.scope === key;
+    const b = el('button', 'px-3 py-1 rounded-lg border ' + (active ? 'bg-indigo-600 border-indigo-600 text-white font-semibold' : 'border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700'), label);
+    b.setAttribute('aria-pressed', String(active));
+    b.addEventListener('click', () => { state.scope = key; renderScope(); refresh(); });
+    box.append(b);
+  }
+}
+
 async function refresh() {
   if (state.refreshing) return;
   state.refreshing = true;
   try {
-    const q = state.source ? `&source=${encodeURIComponent(state.source)}` : '';
+    const q = (state.source ? `&source=${encodeURIComponent(state.source)}` : '')
+      + (state.scope === 'top' ? `&min_score=${TOP_SCORE}` : '');
     const [health, stats, items, runs] = await Promise.all([
       getJSON('/api/health'), getJSON('/api/stats'), getJSON(`/api/items?limit=50${q}`), getJSON('/api/runs?limit=20'),
     ]);
@@ -144,6 +164,7 @@ function tick() {
   if (remain <= -2) refresh(); // 수집 직후 새 next_run_at 과 데이터를 다시 받는다
 }
 
+renderScope();
 renderTabs();
 refresh();
 setInterval(refresh, 5000);

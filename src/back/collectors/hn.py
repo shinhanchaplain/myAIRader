@@ -23,15 +23,22 @@ class HackerNewsCollector(BaseCollector):
         ids = http_get_json(f"{BASE}/newstories.json")
         if not isinstance(ids, list):
             raise CollectError("HN 목록 응답 형식이 올바르지 않습니다")
+        # 1단계: 짧은 읽기 (연결은 즉시 닫는다)
         with db.get_conn() as conn:
             seen = {r[0] for r in conn.execute("SELECT source_id FROM items WHERE source='hn'")}
-            new_ids = [str(i) for i in ids if str(i) not in seen][:MAX_NEW_PER_RUN]
-            with httpx.Client(timeout=10) as client, ThreadPoolExecutor(WORKERS) as pool:
-                stories = list(pool.map(lambda i: self._fetch(client, i), new_ids))
             keywords = db.load_keywords(conn)
-            inserted = 0
-            for story in filter(None, stories):
-                inserted += 1 if self._save(conn, story, keywords) else 0
+        new_ids = [str(i) for i in ids if str(i) not in seen][:MAX_NEW_PER_RUN]
+
+        # 2단계: 조회 + 점수화 + 번역 (DB 연결 없음 → 락 점유 없음)
+        with httpx.Client(timeout=10) as client, ThreadPoolExecutor(WORKERS) as pool:
+            stories = list(pool.map(lambda i: self._fetch(client, i), new_ids))
+        items = [self._build(s, keywords) for s in stories if s]
+
+        # 3단계: 쓰기 트랜잭션은 저장만 짧게 수행
+        inserted = 0
+        with db.get_conn() as conn:
+            for item in items:
+                inserted += 1 if db.insert_item(conn, item) is not None else 0
         return {"fetched": len(new_ids), "inserted": inserted}
 
     @staticmethod
@@ -46,8 +53,8 @@ class HackerNewsCollector(BaseCollector):
         return data
 
     @staticmethod
-    def _save(conn, story: dict, keywords: dict[str, float]) -> bool:
-        """HN 글을 점수화해 저장한다."""
+    def _build(story: dict, keywords: dict[str, float]) -> dict:
+        """HN 글을 점수화하고 한글 요약을 붙인 항목 dict 로 만든다."""
         published = datetime.fromtimestamp(story.get("time", 0), timezone.utc).isoformat(timespec="seconds")
         title = story["title"]
         text = (story.get("text") or "")[:300]
@@ -55,14 +62,12 @@ class HackerNewsCollector(BaseCollector):
         comments = int(story.get("descendants") or 0)
         score, hits = scorer.score_item(title, text, points, published, keywords, hn_comments=comments)
 
-        # 영문 제목/본문 한글 번역/요약
-        source_text = text if text else title
-        summary_ko = translate_to_ko(source_text)
+        # 영문 제목/본문 한글 요약 (실패 시 빈 값 → 원문 중복 표시 방지)
+        summary_ko = translate_to_ko(text or title)
 
-        item = {
+        return {
             "source": "hn", "source_id": str(story["id"]), "title": title,
             "url": story.get("url") or f"https://news.ycombinator.com/item?id={story['id']}",
             "summary": text, "summary_ko": summary_ko, "author": story.get("by"), "stars": 0,
             "published_at": published, "score": score, "tags": ",".join(hits),
         }
-        return db.insert_item(conn, item) is not None
