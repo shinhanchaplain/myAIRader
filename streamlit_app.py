@@ -93,7 +93,11 @@ st.markdown("""
     height: 100%;
     background-color: #6366f1;
     border-radius: 9999px;
-    width: 75%;
+    animation: gauge-shrink 20s linear infinite;
+  }
+  @keyframes gauge-shrink {
+    0% { width: 100%; }
+    100% { width: 0%; }
   }
 
   /* 피드 컨테이너 */
