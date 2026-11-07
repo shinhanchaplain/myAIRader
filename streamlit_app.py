@@ -1,20 +1,225 @@
-"""AI Radar 스트림릿(Streamlit) 실시간 대시보드 웹 앱 (20초 자동 갱신 지원)."""
+"""AI Radar 스트림릿(Streamlit) 대시보드 - 사용자 선호 UI 디자인 적용 버전.
+FastAPI 원본 대시보드의 미려하고 깔끔한 Tailwind 카드 디자인을 1:1로 재현합니다.
+"""
 import os
 import sqlite3
-from datetime import datetime, timezone
+import html
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import streamlit as st
 
-# 페이지 설정
+# 1. 페이지 설정
 st.set_page_config(
     page_title="AI Radar 대시보드",
     page_icon="📡",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 ROOT_DIR = Path(__file__).resolve().parent
 DB_PATH = os.environ.get("RADAR_DB_PATH") or str(ROOT_DIR / "data" / "radar.db")
+KST = timezone(timedelta(hours=9))
+
+# 2. 커스텀 CSS (Tailwind 스타일 및 깔끔한 대시보드 테마)
+st.markdown("""
+<style>
+  /* 전체 페이지 배경 및 여백 설정 */
+  .stApp {
+    background-color: #f8fafc;
+    color: #1e293b;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  .block-container {
+    padding-top: 1.5rem !important;
+    padding-bottom: 2rem !important;
+    max-width: 1150px !important;
+  }
+
+  /* 스트림릿 기본 헤더/푸터 최소화 */
+  header[data-testid="stHeader"] {
+    background-color: transparent !important;
+  }
+  #MainMenu, footer {
+    visibility: hidden;
+  }
+
+  /* 상단 상태 카드 디자인 */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  @media (max-width: 768px) {
+    .stats-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+  .stat-card {
+    background: #ffffff;
+    border-radius: 1rem;
+    padding: 1rem 1.25rem;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
+    border: 1px solid #f1f5f9;
+  }
+  .stat-title {
+    font-size: 0.75rem;
+    color: #64748b;
+    font-weight: 500;
+  }
+  .stat-val {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #0f172a;
+    margin-top: 0.25rem;
+  }
+  .stat-sub {
+    font-size: 0.75rem;
+    color: #94a3b8;
+    margin-top: 0.25rem;
+  }
+
+  /* 프로그레스 바 */
+  .gauge-bg {
+    width: 100%;
+    height: 8px;
+    background-color: #e2e8f0;
+    border-radius: 9999px;
+    margin-top: 0.5rem;
+    overflow: hidden;
+  }
+  .gauge-fill {
+    height: 100%;
+    background-color: #6366f1;
+    border-radius: 9999px;
+    width: 75%;
+  }
+
+  /* 피드 컨테이너 */
+  .feed-container {
+    background: #ffffff;
+    border-radius: 1rem;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+    border: 1px solid #f1f5f9;
+    overflow: hidden;
+    margin-top: 1rem;
+  }
+
+  /* 피드 헤더 바 */
+  .feed-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid #f1f5f9;
+  }
+
+  /* 피드 아이템 */
+  .feed-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 1.1rem 1.25rem;
+    border-bottom: 1px solid #f1f5f9;
+    transition: background-color 0.15s ease;
+  }
+  .feed-item:hover {
+    background-color: #f8fafc;
+  }
+  .feed-item:last-child {
+    border-bottom: none;
+  }
+
+  /* 뱃지 스타일 */
+  .badge {
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    flex-shrink: 0;
+    margin-top: 0.15rem;
+  }
+  .badge-github {
+    background-color: #0f172a;
+    color: #ffffff;
+  }
+  .badge-hn {
+    background-color: #f97316;
+    color: #ffffff;
+  }
+  .badge-kakao {
+    background-color: #facc15;
+    color: #451a03;
+  }
+
+  /* 타이틀 및 점수 */
+  .item-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #1e293b;
+    text-decoration: none;
+    line-height: 1.4;
+  }
+  .item-title:hover {
+    text-decoration: underline;
+    color: #4f46e5;
+  }
+  .item-score {
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: #4f46e5;
+    flex-shrink: 0;
+    margin-left: auto;
+    padding-left: 0.5rem;
+  }
+
+  /* 한글 요약 박스 */
+  .ko-summary-box {
+    margin-top: 0.45rem;
+    padding: 0.6rem 0.85rem;
+    background-color: #eef2ff;
+    border-left: 4px solid #6366f1;
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    color: #1e293b;
+    line-height: 1.55;
+  }
+  .ko-label {
+    font-weight: 700;
+    color: #4f46e5;
+    margin-right: 0.4rem;
+  }
+
+  /* 본문 및 메타 */
+  .item-desc {
+    font-size: 0.875rem;
+    color: #475569;
+    margin-top: 0.35rem;
+    line-height: 1.5;
+  }
+  .item-meta {
+    font-size: 0.75rem;
+    color: #94a3b8;
+    margin-top: 0.35rem;
+  }
+
+  /* 접기/펼치기 details */
+  details summary {
+    outline: none;
+    cursor: pointer;
+    user-select: none;
+    font-size: 0.75rem;
+    color: #4f46e5;
+    font-weight: 700;
+    margin-top: 0.4rem;
+    list-style: none;
+  }
+  details summary::-webkit-details-marker {
+    display: none;
+  }
+</style>
+""", unsafe_allow_html=True)
 
 
 def get_connection():
@@ -24,33 +229,70 @@ def get_connection():
     return conn
 
 
-def load_stats():
-    """상단 통계 지표 로드."""
+def time_ago(iso_str: str) -> str:
+    """ISO 문자열을 상대 시간(예: 5분 전, 1시간 전)으로 변환."""
+    if not iso_str:
+        return ""
+    try:
+        t = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc)
+        diff = (now - t).total_seconds()
+        if diff < 60:
+            return f"{max(int(diff), 1)}초 전"
+        if diff < 3600:
+            return f"{int(diff // 60)}분 전"
+        if diff < 86400:
+            return f"{int(diff // 3600)}시간 전"
+        return f"{int(diff // 86400)}일 전"
+    except Exception:
+        return iso_str[:10]
+
+
+def load_stats_data():
+    """대시보드 상단 통계 수치 로드."""
     with get_connection() as conn:
         total = conn.execute("SELECT COUNT(*) FROM items").fetchone()[0]
-        top_count = conn.execute("SELECT COUNT(*) FROM items WHERE score >= 10").fetchone()[0]
         kakao_count = conn.execute("SELECT COUNT(*) FROM items WHERE source = 'kakaotalk'").fetchone()[0]
         github_count = conn.execute("SELECT COUNT(*) FROM items WHERE source = 'github'").fetchone()[0]
         hn_count = conn.execute("SELECT COUNT(*) FROM items WHERE source = 'hn'").fetchone()[0]
+
+        # 24시간 내 신규 수집 수
+        since_24h = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        new_24h = conn.execute("SELECT COUNT(*) FROM items WHERE first_seen_at >= ?", (since_24h,)).fetchone()[0]
+
+        # 최근 1시간 성공률
+        since_1h = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        runs_1h = conn.execute(
+            "SELECT COUNT(*), SUM(CASE WHEN status='ok' THEN 1 ELSE 0 END) FROM collect_runs WHERE started_at >= ?",
+            (since_1h,)
+        ).fetchone()
+        total_runs = runs_1h[0] or 0
+        ok_runs = runs_1h[1] or 0
+        success_rate = round(ok_runs / total_runs * 100, 1) if total_runs else 100.0
+
+        # 오늘 슬랙 발송 수
+        midnight = datetime.now(KST).replace(hour=0, minute=0, second=0, microsecond=0)
+        start_utc = midnight.astimezone(timezone.utc).isoformat(timespec="seconds")
+        slack_sent = conn.execute("SELECT COUNT(*) FROM items WHERE notified_at >= ?", (start_utc,)).fetchone()[0]
+
     return {
         "total": total,
-        "top": top_count,
-        "kakao": kakao_count,
+        "new_24h": new_24h,
         "github": github_count,
         "hn": hn_count,
+        "kakao": kakao_count,
+        "success_rate": success_rate,
+        "slack_sent": slack_sent,
     }
 
 
-def load_items(min_score: float = 0.0, source: str = "", query: str = "", limit: int = 60):
-    """조건별 피드 아이템 조회."""
+def load_feed_items(source: str, min_score: float, limit: int = 50):
+    """조건에 부합하는 피드 아이템 로드."""
     sql = "SELECT * FROM items WHERE score >= ?"
     args = [min_score]
     if source:
         sql += " AND source = ?"
         args.append(source)
-    if query:
-        sql += " AND (title LIKE ? OR summary LIKE ? OR summary_ko LIKE ?)"
-        args.extend([f"%{query}%", f"%{query}%", f"%{query}%"])
     sql += " ORDER BY first_seen_at DESC, score DESC LIMIT ?"
     args.append(limit)
 
@@ -59,109 +301,165 @@ def load_items(min_score: float = 0.0, source: str = "", query: str = "", limit:
         return [dict(r) for r in rows]
 
 
-# --- 사이드바 ---
-st.sidebar.title("📡 AI Radar 컨트롤")
-st.sidebar.markdown("GitHub · Hacker News · 카카오톡 동향 레이더")
-
-# 1. 점수 필터 (토글)
-score_mode = st.sidebar.radio(
-    "🎯 점수 필터",
-    ["⭐ 10점 이상 추천글 (기본)", "📜 전체 글 보기 (낮은 점수 포함)"],
-    index=0,
-)
-min_score = 10.0 if "10점" in score_mode else 0.0
-
-# 2. 출처 선택
-source_choice = st.sidebar.selectbox(
-    "📁 출처 필터",
-    ["전체", "GitHub", "Hacker News", "카카오톡"],
-    index=0,
-)
-source_map = {"전체": "", "GitHub": "github", "Hacker News": "hn", "카카오톡": "kakaotalk"}
-selected_source = source_map[source_choice]
-
-# 3. 검색어 입력
-search_query = st.sidebar.text_input("🔍 키워드 검색", placeholder="예: claude, agent, 모델")
-
-st.sidebar.divider()
-st.sidebar.caption("⏱️ 20초마다 최신 글이 자동으로 갱신됩니다.")
-
-# --- 메인 영역 ---
-st.title("🛰️ AI Radar 실시간 트렌드 대시보드")
-st.caption("AI 에이전트, MCP, LLM 및 오픈채팅방 실시간 정보 수집기")
+# --- 상단 헤더 ---
+now_kst = datetime.now(KST).strftime("%Y. %m. %d. %p %I:%M:%S").replace("AM", "오전").replace("PM", "오후")
+st.markdown(f"""
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 1rem;">
+  <div>
+    <h1 style="font-size: 1.6rem; font-weight: 800; color: #0f172a; margin: 0; display: inline-flex; align-items: center; gap: 0.5rem;">
+      📡 AI Radar
+    </h1>
+    <p style="font-size: 0.85rem; color: #64748b; margin: 0.2rem 0 0 0;">
+      GitHub · Hacker News · 카카오톡 AI 오픈채팅 동향 레이더
+    </p>
+  </div>
+  <div style="font-size: 0.75rem; color: #94a3b8;">
+    {now_kst}
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
 
-# 20초마다 자동 갱신되는 실시간 피드 섹션
+# --- 20초 자동 갱신 실시간 대시보드 조각 (Fragment) ---
 @st.fragment(run_every="20s")
-def live_dashboard():
-    # 통계 메트릭 표시
-    stats = load_stats()
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("총 수집 항목", f"{stats['total']:,} 건")
-    with col2:
-        st.metric("🔥 10점 이상 추천글", f"{stats['top']:,} 건", delta="엄선 알짜")
-    with col3:
-        st.metric("카카오톡 정보", f"{stats['kakao']} 건", delta="실시간 톡방")
-    with col4:
-        st.metric("오픈소스 (GitHub/HN)", f"{stats['github'] + stats['hn']:,} 건")
+def render_dashboard_content():
+    stats = load_stats_data()
 
-    st.divider()
+    # 4개 통계 카드
+    st.markdown(f"""
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-title">수집 상태</div>
+        <div class="stat-val" style="color: #059669;">🟢 정상</div>
+        <div class="stat-sub">20초마다 자동 갱신</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-title">다음 수집까지</div>
+        <div class="stat-val">20 <span style="font-size: 1rem; font-weight: 400; color: #94a3b8;">초</span></div>
+        <div class="gauge-bg">
+          <div class="gauge-fill"></div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-title">24시간 신규 / 전체</div>
+        <div class="stat-val">{stats['new_24h']:,} <span style="font-size: 1rem; font-weight: 400; color: #94a3b8;">/ {stats['total']:,}</span></div>
+        <div class="stat-sub">GitHub {stats['github']} · HN {stats['hn']} · 카톡 {stats['kakao']}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-title">수집 성공률 (1시간)</div>
+        <div class="stat-val">{stats['success_rate']}%</div>
+        <div class="stat-sub">Slack 오늘 {stats['slack_sent']}/300건</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    # 피드 아이템 로드
-    items = load_items(min_score=min_score, source=selected_source, query=search_query)
+    # 필터 컨트롤 (상단 탭 형식)
+    col_filter1, col_filter2 = st.columns([3, 2])
+    with col_filter1:
+        source_tab = st.pills(
+            "출처 선택",
+            options=["전체", "카카오톡", "GitHub", "Hacker News"],
+            default="전체",
+            label_visibility="collapsed",
+        )
+    with col_filter2:
+        score_tab = st.pills(
+            "점수 필터",
+            options=["⭐ 10점 이상 추천글", "📜 전체 글 보기 (낮은 점수 포함)"],
+            default="⭐ 10점 이상 추천글",
+            label_visibility="collapsed",
+        )
 
-    col_h1, col_h2 = st.columns([4, 1])
-    with col_h1:
-        st.subheader(f"실시간 피드 ({len(items)}건 표시)")
-    with col_h2:
-        now_str = datetime.now().strftime("%H:%M:%S")
-        st.caption(f"🔄 갱신시각: {now_str}")
+    source_map = {"전체": "", "카카오톡": "kakaotalk", "GitHub": "github", "Hacker News": "hn"}
+    selected_source = source_map.get(source_tab, "")
+    min_score = 10.0 if "10점" in (score_tab or "") else 0.0
 
-    if min_score >= 10.0:
-        st.info("💡 현재 **10점 이상의 핵심 추천글**만 표시 중입니다. 더 많은 글을 보시려면 사이드바에서 '전체 글 보기'를 선택하세요.")
+    items = load_feed_items(source=selected_source, min_score=min_score, limit=50)
+
+    # 피드 리스트 렌더링
+    feed_html_list = []
+    feed_html_list.append('<div class="feed-container">')
 
     if not items:
-        st.warning("조건에 맞는 수집 항목이 없습니다.")
+        feed_html_list.append('<div style="padding: 2.5rem; text-align: center; color: #94a3b8; font-size: 0.875rem;">조건에 일치하는 글이 없습니다.</div>')
     else:
         for it in items:
-            with st.container():
-                src_label = {"github": "🐙 GitHub", "hn": "📰 Hacker News", "kakaotalk": "💬 카카오톡"}.get(it["source"], it["source"])
-                score_color = "🔥" if it["score"] >= 10 else "⭐"
+            src = it.get("source", "")
+            if src == "github":
+                badge_html = '<span class="badge badge-github">GitHub</span>'
+            elif src == "hn":
+                badge_html = '<span class="badge badge-hn">Hacker News</span>'
+            else:
+                badge_html = '<span class="badge badge-kakao">카톡</span>'
 
-                col_title, col_score = st.columns([5, 1])
-                with col_title:
-                    if it.get("url"):
-                        st.markdown(f"#### [{it['title']}]({it['url']})")
-                    else:
-                        st.markdown(f"#### {it['title']}")
-                with col_score:
-                    st.markdown(f"**{score_color} {it['score']:.1f}점**")
+            title_text = html.escape(it.get("title") or "제목 없음")
+            url = it.get("url")
+            if url:
+                safe_url = html.escape(url)
+                title_elem = f'<a href="{safe_url}" target="_blank" rel="noopener noreferrer" class="item-title">{title_text}</a>'
+            else:
+                title_elem = f'<span class="item-title">{title_text}</span>'
 
-                ko_summary = (it.get("summary_ko") or "").strip()
-                if ko_summary and ko_summary != (it.get("summary") or "").strip() and ko_summary != it["title"]:
-                    st.success(f"🇰🇷 **한글 요약:** {ko_summary}")
+            score_elem = f'<span class="item-score">{it.get("score", 0):.2f}점</span>'
 
-                content = (it.get("summary") or "").strip()
-                if content and content != it["title"]:
-                    if len(content) > 100 or it["source"] == "kakaotalk":
-                        with st.expander("📖 전체 본문 읽기 / 펼쳐보기"):
-                            st.markdown(content)
-                    else:
-                        st.write(content)
+            # 한글 요약 상자
+            ko_summary = (it.get("summary_ko") or "").strip()
+            orig_summary = (it.get("summary") or "").strip()
+            ko_box_html = ""
+            if ko_summary and ko_summary != orig_summary and ko_summary != it.get("title"):
+                safe_ko = html.escape(ko_summary)
+                ko_box_html = f'''
+                <div class="ko-summary-box">
+                  <span class="ko-label">🇰🇷 한글 요약:</span> {safe_ko}
+                </div>
+                '''
 
-                meta_parts = [f"**출처:** {src_label}"]
-                if it.get("room"):
-                    meta_parts.append(f"**채팅방:** {it['room']}")
-                if it.get("author"):
-                    meta_parts.append(f"**작성자:** {it['author']}")
-                if it.get("stars"):
-                    meta_parts.append(f"★ {it['stars']:,}")
-                if it.get("first_seen_at"):
-                    meta_parts.append(f"수집 시각: {it['first_seen_at'][:19].replace('T', ' ')}")
+            # 본문 및 접기/펼치기
+            desc_html = ""
+            if orig_summary and orig_summary != it.get("title"):
+                safe_desc = html.escape(orig_summary)
+                if len(safe_desc) > 80 or "\n" in safe_desc or src == "kakaotalk":
+                    short_desc = safe_desc[:80] + "..."
+                    desc_html = f'''
+                    <div class="item-desc">{short_desc}</div>
+                    <details>
+                      <summary>전체 보기 ▼</summary>
+                      <div class="item-desc" style="white-space: pre-wrap; margin-top: 0.4rem; padding: 0.5rem; background: #f8fafc; border-radius: 0.375rem;">{safe_desc}</div>
+                    </details>
+                    '''
+                else:
+                    desc_html = f'<div class="item-desc">{safe_desc}</div>'
 
-                st.caption(" · ".join(meta_parts))
-                st.divider()
+            # 메타 정보 (작성자, 방 이름, 별점, 시간)
+            meta_parts = []
+            if it.get("room"):
+                meta_parts.append(f"⚑ {html.escape(it['room'])}")
+            if it.get("author"):
+                meta_parts.append(html.escape(it["author"]))
+            if it.get("stars"):
+                meta_parts.append(f"★ {it['stars']}")
+            meta_parts.append(time_ago(it.get("first_seen_at")))
+            meta_str = " · ".join(meta_parts)
+            meta_html = f'<div class="item-meta">{meta_str}</div>'
+
+            item_html = f'''
+            <div class="feed-item">
+              {badge_html}
+              <div style="flex-grow: 1; min-width: 0;">
+                <div style="display: flex; align-items: baseline; justify-content: space-between;">
+                  {title_elem}
+                  {score_elem}
+                </div>
+                {ko_box_html}
+                {desc_html}
+                {meta_html}
+              </div>
+            </div>
+            '''
+            feed_html_list.append(item_html)
+
+    feed_html_list.append('</div>')
+    st.markdown("".join(feed_html_list), unsafe_allow_html=True)
 
 
-live_dashboard()
+render_dashboard_content()
